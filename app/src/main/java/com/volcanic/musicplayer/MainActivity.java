@@ -118,7 +118,7 @@ public class MainActivity extends Activity {
         if (requestCode == REQ_READ_AUDIO && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             scanMediaStoreAsync();
         } else if (requestCode == REQ_READ_AUDIO) {
-            toast("Audio permission denied");
+            toast("未授予音频读取权限");
         }
     }
 
@@ -146,9 +146,9 @@ public class MainActivity extends Activity {
         appTitle.setSingleLine(true);
         appTitle.setEllipsize(TextUtils.TruncateAt.END);
         titleBlock.addView(appTitle);
-        titleBlock.addView(textView("Android decoder", 13, muted, Typeface.NORMAL));
+        titleBlock.addView(textView("本地解包与播放", 13, muted, Typeface.NORMAL));
 
-        statusText = textView("No tracks", 13, cyan, Typeface.BOLD);
+        statusText = textView("无歌曲", 13, cyan, Typeface.BOLD);
         statusText.setGravity(Gravity.END);
         header.addView(statusText, new LinearLayout.LayoutParams(dp(92), ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -160,11 +160,11 @@ public class MainActivity extends Activity {
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setPadding(0, dp(12), 0, dp(12));
         actionScroll.addView(actions);
-        actions.addView(actionButton("Import", this::openAudioPicker));
-        actions.addView(actionButton("Scan", v -> requestScan()));
-        actions.addView(actionButton("Process", v -> processAllOutputsAsync()));
-        actions.addView(actionButton("Clear", v -> clearPlaylist()));
-        actions.addView(actionButton("Save", v -> savePlaylist()));
+        actions.addView(actionButton("导入", this::openAudioPicker));
+        actions.addView(actionButton("扫描", v -> requestScan()));
+        actions.addView(actionButton("处理输出", v -> processAllOutputsAsync()));
+        actions.addView(actionButton("清空", v -> clearPlaylist()));
+        actions.addView(actionButton("保存", v -> savePlaylist()));
 
         ListView listView = new ListView(this);
         listView.setDivider(null);
@@ -182,12 +182,12 @@ public class MainActivity extends Activity {
         LinearLayout playerBar = card(LinearLayout.VERTICAL, dp(16), dp(12));
         root.addView(playerBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        nowTitle = textView("Nothing playing", 17, text, Typeface.BOLD);
+        nowTitle = textView("还没有播放歌曲", 17, text, Typeface.BOLD);
         nowTitle.setSingleLine(true);
         nowTitle.setEllipsize(TextUtils.TruncateAt.END);
         playerBar.addView(nowTitle);
 
-        nowMeta = textView("Tap a track. Outputs stay in VolcanicOutput.", 12, muted, Typeface.NORMAL);
+        nowMeta = textView("点按歌曲播放。解包文件会保存在 VolcanicOutput。", 12, muted, Typeface.NORMAL);
         nowMeta.setSingleLine(false);
         nowMeta.setMaxLines(5);
         playerBar.addView(nowMeta);
@@ -197,11 +197,11 @@ public class MainActivity extends Activity {
         controls.setPadding(0, dp(10), 0, 0);
         playerBar.addView(controls, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        controls.addView(controlButton("Prev", v -> previousTrack()));
-        playButton = controlButton("Play", v -> togglePlay());
+        controls.addView(controlButton("上一首", v -> previousTrack()));
+        playButton = controlButton("播放", v -> togglePlay());
         playButton.setBackground(round(red, dp(18), red));
         controls.addView(playButton);
-        controls.addView(controlButton("Next", v -> nextTrack()));
+        controls.addView(controlButton("下一首", v -> nextTrack()));
     }
 
     private void openAudioPicker(View ignored) {
@@ -216,11 +216,11 @@ public class MainActivity extends Activity {
 
     private void importPickedAudio(Intent data) {
         if (processing) {
-            toast("Processing is already running");
+            toast("正在处理中");
             return;
         }
         processing = true;
-        statusText.setText("Importing");
+        statusText.setText("导入中");
         worker.execute(() -> {
             int before = tracks.size();
             try {
@@ -237,13 +237,13 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     processing = false;
                     refreshUi();
-                    toast("Imported " + imported + ", output ready: " + summary.ready + ", pending: " + summary.pending);
+                    toast("已导入 " + imported + " 首，输出完成 " + summary.ready + " 首，待处理 " + summary.pending + " 首");
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
                     processing = false;
                     refreshUi();
-                    toast("Import failed: " + valueOr(error.getMessage(), error.getClass().getSimpleName()));
+                    toast("导入失败：" + valueOr(error.getMessage(), error.getClass().getSimpleName()));
                 });
             }
         });
@@ -256,14 +256,14 @@ public class MainActivity extends Activity {
             // Some providers do not expose persistable permissions.
         }
         String name = displayName(uri);
-        AudioTrack track = new AudioTrack(name, "Imported file", uri.toString(), extensionOf(name));
+        AudioTrack track = new AudioTrack(name, "导入文件", uri.toString(), extensionOf(name));
         try {
             track.localPath = copyUriToInput(uri, name).getAbsolutePath();
-            track.status = "Imported";
-            track.detail = "Local copy ready";
+            track.status = "已导入";
+            track.detail = "本地副本已就绪";
         } catch (Exception error) {
-            track.status = "Import failed";
-            track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "copy failed");
+            track.status = "导入失败";
+            track.detail = error.getClass().getSimpleName() + "：" + valueOr(error.getMessage(), "复制失败");
         }
         addTrack(track);
     }
@@ -279,11 +279,11 @@ public class MainActivity extends Activity {
 
     private void scanMediaStoreAsync() {
         if (processing) {
-            toast("Processing is already running");
+            toast("正在处理中");
             return;
         }
         processing = true;
-        statusText.setText("Scanning");
+        statusText.setText("扫描中");
         worker.execute(() -> {
             try {
                 scanMediaStore();
@@ -291,7 +291,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     processing = false;
                     refreshUi();
-                    toast("Scan failed: " + valueOr(error.getMessage(), error.getClass().getSimpleName()));
+                    toast("扫描失败：" + valueOr(error.getMessage(), error.getClass().getSimpleName()));
                 });
             }
         });
@@ -308,7 +308,7 @@ public class MainActivity extends Activity {
         String selection = MediaStore.Audio.Media.IS_MUSIC + "!=0";
         try (Cursor cursor = getContentResolver().query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, projection, selection, null, MediaStore.Audio.Media.DATE_ADDED + " DESC")) {
             if (cursor == null) {
-                runOnUiThread(() -> toast("No media library cursor"));
+                runOnUiThread(() -> toast("没有读取到媒体库"));
                 processing = false;
                 return;
             }
@@ -320,16 +320,16 @@ public class MainActivity extends Activity {
                 long id = cursor.getLong(idIndex);
                 String display = cursor.getString(displayIndex);
                 String title = valueOr(cursor.getString(titleIndex), display);
-                String artist = valueOr(cursor.getString(artistIndex), "Local music");
+                String artist = valueOr(cursor.getString(artistIndex), "本机音乐");
                 Uri uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id);
                 AudioTrack track = new AudioTrack(title, artist, uri.toString(), extensionOf(display));
                 try {
                     track.localPath = copyUriToInput(uri, valueOr(display, title)).getAbsolutePath();
-                    track.status = "Imported";
-                    track.detail = "Local copy ready";
+                    track.status = "已导入";
+                    track.detail = "本地副本已就绪";
                 } catch (Exception error) {
-                    track.status = "Import failed";
-                    track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "copy failed");
+                    track.status = "导入失败";
+                    track.detail = error.getClass().getSimpleName() + "：" + valueOr(error.getMessage(), "复制失败");
                 }
                 addTrack(track);
             }
@@ -339,17 +339,17 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> {
             processing = false;
             refreshUi();
-            toast("Scanned " + (tracks.size() - before) + ", output ready: " + summary.ready + ", pending: " + summary.pending);
+            toast("扫描新增 " + (tracks.size() - before) + " 首，输出完成 " + summary.ready + " 首，待处理 " + summary.pending + " 首");
         });
     }
 
     private void processAllOutputsAsync() {
         if (processing) {
-            toast("Processing is already running");
+            toast("正在处理中");
             return;
         }
         processing = true;
-        statusText.setText("Processing");
+        statusText.setText("处理中");
         worker.execute(() -> {
             try {
                 ProcessSummary summary = processOutputsOnWorker();
@@ -357,13 +357,13 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     processing = false;
                     refreshUi();
-                    toast("Output ready: " + summary.ready + ", pending: " + summary.pending);
+                    toast("输出完成 " + summary.ready + " 首，待处理 " + summary.pending + " 首");
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
                     processing = false;
                     refreshUi();
-                    toast("Process failed: " + valueOr(error.getMessage(), error.getClass().getSimpleName()));
+                    toast("处理失败：" + valueOr(error.getMessage(), error.getClass().getSimpleName()));
                 });
             }
         });
@@ -389,8 +389,8 @@ public class MainActivity extends Activity {
         }
         File source = sourceFile(track);
         if (source == null) {
-            track.status = "Input unavailable";
-            track.detail = "Permission denied or local input copy missing. Re-import the file.";
+            track.status = "输入不可用";
+            track.detail = "权限失效或本地副本丢失，请重新导入文件。";
             return false;
         }
         if (PrivateContainerDecoder.isPrivateContainer(track.extension)) {
@@ -407,13 +407,13 @@ public class MainActivity extends Activity {
                     track.detail = track.outputPath;
                     return true;
                 } catch (Exception error) {
-                    track.status = "Output failed";
-                    track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "copy failed");
+                    track.status = "输出失败";
+                    track.detail = error.getClass().getSimpleName() + "：" + valueOr(error.getMessage(), "复制失败");
                     return false;
                 }
             }
-            track.status = "Output pending";
-            track.detail = "Unsupported direct format: " + track.extension.toUpperCase(Locale.ROOT);
+            track.status = "等待处理";
+            track.detail = "暂不支持直接处理该格式：" + track.extension.toUpperCase(Locale.ROOT);
             return false;
         }
         File target = uniqueOutputFile(track.title, "mp3");
@@ -425,8 +425,8 @@ public class MainActivity extends Activity {
             track.detail = target.getAbsolutePath();
             return true;
         } catch (Exception error) {
-            track.status = "MP3 output failed";
-            track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "copy failed");
+            track.status = "MP3 输出失败";
+            track.detail = error.getClass().getSimpleName() + "：" + valueOr(error.getMessage(), "复制失败");
             return false;
         }
     }
@@ -435,8 +435,8 @@ public class MainActivity extends Activity {
         try {
             DecodedAudio decoded = PrivateContainerDecoder.decode(source, track.extension);
             if ("unknown".equals(decoded.format)) {
-                track.status = "Decode failed";
-                track.detail = "Decoded payload is not MP3/FLAC/WAV";
+                track.status = "解包失败";
+                track.detail = "解包负载不是 MP3/FLAC/WAV";
                 return false;
             }
 
@@ -463,8 +463,8 @@ public class MainActivity extends Activity {
             track.detail = target.getAbsolutePath();
             return true;
         } catch (Exception error) {
-            track.status = track.decodedPath == null ? "Decode failed" : "Output failed";
-            track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "private container decode failed");
+            track.status = track.decodedPath == null ? "解包失败" : "输出失败";
+            track.detail = error.getClass().getSimpleName() + "：" + valueOr(error.getMessage(), "私有容器解包失败");
             return false;
         }
     }
@@ -486,8 +486,8 @@ public class MainActivity extends Activity {
 
         Uri playUri = playbackUri(track);
         if (playUri == null) {
-            track.status = "Playback unavailable";
-            track.detail = "No playable output yet. Tap Process and wait for decoding to finish.";
+            track.status = "无法播放";
+            track.detail = "还没有可播放输出。请点“处理输出”并等待解包完成。";
             refreshUi();
             toast(track.detail);
             return;
@@ -503,20 +503,20 @@ public class MainActivity extends Activity {
             player.setOnPreparedListener(mp -> {
                 prepared = true;
                 mp.start();
-                track.status = "Playing";
+                track.status = "正在播放";
                 track.detail = playableLabel(track);
                 refreshUi();
             });
             player.setOnCompletionListener(mp -> {
                 if (currentIndex >= 0 && currentIndex < tracks.size()) {
                     AudioTrack done = tracks.get(currentIndex);
-                    done.status = done.outputPath != null ? outputStatus(done.outputPath) : "Playback finished";
+                    done.status = done.outputPath != null ? outputStatus(done.outputPath) : "播放完成";
                 }
                 refreshUi();
             });
             player.setOnErrorListener((mp, what, extra) -> {
-                track.status = "Playback failed";
-                track.detail = "MediaPlayer error " + what + "/" + extra;
+                track.status = "播放失败";
+                track.detail = "播放器错误 " + what + "/" + extra;
                 releasePlayer();
                 refreshUi();
                 toast(track.detail);
@@ -524,11 +524,11 @@ public class MainActivity extends Activity {
             });
             player.prepareAsync();
             nowTitle.setText(track.title);
-            nowMeta.setText("Loading " + playableLabel(track));
+            nowMeta.setText("正在加载：" + playableLabel(track));
             refreshUi();
         } catch (Exception error) {
-            track.status = "Playback failed";
-            track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "cannot open source");
+            track.status = "播放失败";
+            track.detail = error.getClass().getSimpleName() + "：" + valueOr(error.getMessage(), "无法打开音频源");
             toast(track.detail);
             releasePlayer();
             refreshUi();
@@ -555,17 +555,17 @@ public class MainActivity extends Activity {
 
     private String playableLabel(AudioTrack track) {
         if (track.outputPath != null) {
-            return "Output: " + track.outputPath;
+            return "输出：" + track.outputPath;
         }
         if (track.decodedPath != null) {
-            return "Decoded file: " + track.decodedPath;
+            return "解包文件：" + track.decodedPath;
         }
-        return "Original source: " + track.extension.toUpperCase(Locale.ROOT);
+        return "原始音频：" + track.extension.toUpperCase(Locale.ROOT);
     }
 
     private void togglePlay() {
         if (tracks.isEmpty()) {
-            toast("Import audio first");
+            toast("请先导入音频");
             return;
         }
         if (player == null) {
@@ -644,7 +644,7 @@ public class MainActivity extends Activity {
                 output.write(array.toString(2).getBytes(StandardCharsets.UTF_8));
             }
         } catch (Exception error) {
-            toast("Save failed");
+            toast("保存失败");
         }
     }
 
@@ -663,8 +663,8 @@ public class MainActivity extends Activity {
             for (int i = 0; i < array.length(); i++) {
                 JSONObject object = array.getJSONObject(i);
                 AudioTrack track = new AudioTrack(
-                        object.optString("title", "Unknown audio"),
-                        object.optString("subtitle", "Saved"),
+                        object.optString("title", "未知音频"),
+                        object.optString("subtitle", "已保存"),
                         object.optString("uri"),
                         object.optString("extension", "unknown")
                 );
@@ -672,32 +672,32 @@ public class MainActivity extends Activity {
                 track.decodedPath = emptyToNull(object.optString("decodedPath", null));
                 track.outputPath = object.optString("outputPath", null);
                 track.outputPath = emptyToNull(track.outputPath);
-                track.status = object.optString("status", "Waiting");
+                track.status = normalizeStatus(object.optString("status", "等待处理"));
                 track.detail = object.optString("detail", "");
                 addTrack(track);
             }
         } catch (Exception error) {
-            toast("Load playlist failed");
+            toast("读取列表失败");
         }
     }
 
     private void refreshUi() {
-        statusText.setText(tracks.isEmpty() ? "No tracks" : tracks.size() + " tracks");
+        statusText.setText(tracks.isEmpty() ? "无歌曲" : tracks.size() + " 首");
         if (adapter != null) {
             adapter.notifyDataSetChanged();
         }
         if (player != null && prepared) {
-            playButton.setText(player.isPlaying() ? "Pause" : "Play");
+            playButton.setText(player.isPlaying() ? "暂停" : "播放");
         } else {
-            playButton.setText("Play");
+            playButton.setText("播放");
         }
         if (currentIndex >= 0 && currentIndex < tracks.size()) {
             AudioTrack track = tracks.get(currentIndex);
             nowTitle.setText(track.title);
             nowMeta.setText(valueOr(track.detail, track.status));
         } else {
-            nowTitle.setText("Nothing playing");
-            nowMeta.setText(tracks.isEmpty() ? "Import audio first" : "Tap a track to play");
+            nowTitle.setText("还没有播放歌曲");
+            nowMeta.setText(tracks.isEmpty() ? "请先导入音频" : "点按歌曲播放");
         }
     }
 
@@ -720,7 +720,7 @@ public class MainActivity extends Activity {
         if (name == null || name.trim().isEmpty()) {
             name = uri.getLastPathSegment();
         }
-        return valueOr(name, "Unknown audio");
+        return valueOr(name, "未知音频");
     }
 
     private File copyUriToInput(Uri uri, String displayName) throws Exception {
@@ -728,7 +728,7 @@ public class MainActivity extends Activity {
         try (InputStream input = getContentResolver().openInputStream(uri);
              FileOutputStream output = new FileOutputStream(target)) {
             if (input == null) {
-                throw new IllegalStateException("Input stream unavailable");
+                throw new IllegalStateException("输入流不可用");
             }
             copyStream(input, output);
         }
@@ -776,7 +776,7 @@ public class MainActivity extends Activity {
     }
 
     private String outputStatus(String path) {
-        return extensionOf(path).toUpperCase(Locale.ROOT) + " output ready";
+        return extensionOf(path).toUpperCase(Locale.ROOT) + " 输出完成";
     }
 
     private File uniqueDecodedFile(String title, String extension) {
@@ -822,6 +822,22 @@ public class MainActivity extends Activity {
 
     private String emptyToNull(String value) {
         return value == null || value.trim().isEmpty() || "null".equals(value) ? null : value;
+    }
+
+    private String normalizeStatus(String value) {
+        if (value == null || value.trim().isEmpty() || "Waiting".equals(value)) {
+            return "等待处理";
+        }
+        if ("Imported".equals(value)) {
+            return "已导入";
+        }
+        if (value.contains("output ready")) {
+            return value.replace(" output ready", " 输出完成");
+        }
+        if (value.contains("failed")) {
+            return value.replace("failed", "失败");
+        }
+        return value;
     }
 
     private Button actionButton(String label, View.OnClickListener listener) {
@@ -956,16 +972,16 @@ public class MainActivity extends Activity {
             pathView.setMaxLines(5);
             copy.addView(pathView);
 
-            TextView hint = textView("delete", 10, muted, Typeface.NORMAL);
+            TextView hint = textView("长按删除", 10, muted, Typeface.NORMAL);
             row.addView(hint);
             return row;
         }
 
         private int statusColor(AudioTrack track) {
-            if (track.status.contains("ready") || track.status.contains("Playing")) {
+            if (track.status.contains("完成") || track.status.contains("正在播放")) {
                 return green;
             }
-            if (track.status.contains("blocked") || track.status.contains("failed")) {
+            if (track.status.contains("失败") || track.status.contains("不可用") || track.status.contains("无法")) {
                 return amber;
             }
             return cyan;
@@ -973,12 +989,12 @@ public class MainActivity extends Activity {
 
         private String pathText(AudioTrack track) {
             if (track.outputPath != null) {
-                return "Output: " + track.outputPath;
+                return "输出：" + track.outputPath;
             }
             if (track.decodedPath != null) {
-                return "Decoded: " + track.decodedPath;
+                return "解包：" + track.decodedPath;
             }
-            return valueOr(track.detail, "Long press to delete");
+            return valueOr(track.detail, "长按删除");
         }
     }
 
@@ -990,7 +1006,7 @@ public class MainActivity extends Activity {
         String localPath;
         String decodedPath;
         String outputPath;
-        String status = "Waiting";
+        String status = "等待处理";
         String detail = "";
 
         AudioTrack(String title, String subtitle, String uri, String extension) {
