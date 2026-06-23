@@ -9,7 +9,7 @@ This folder is an isolated Android implementation for Volcanic. It does not chan
 - Copy imported files into app-private input storage before decoding to avoid stale URI permission failures.
 - Decode `.ncm`, `.kgm`/`.vpr`, and `.qmc` private containers locally.
 - Detect decoded payloads as MP3, FLAC, or WAV.
-- Encode decoded non-MP3 audio to MP3 through the Android built-in `MediaCodec` audio encoder when the device exposes one.
+- Process imports on a background worker so large files do not block or crash the UI thread.
 - Persist the playlist to app-private storage.
 - Play, pause, previous, next, remove, and clear tracks.
 - Keep UI dark, compact, and readable.
@@ -17,8 +17,9 @@ This folder is an isolated Android implementation for Volcanic. It does not chan
 ## Decode behavior
 
 - MP3 payloads are written to `VolcanicOutput` as `.mp3` and used for playback.
-- FLAC/WAV payloads are decoded first, then transcoded to MP3 through the bundled Android `MediaCodec` path.
+- FLAC/WAV payloads are decoded and preserved as `.flac` / `.wav` outputs instead of being forced to MP3.
 - Output names keep the original song/file name where Android allows it; only filesystem-forbidden characters are replaced.
+- Output paths are displayed in the track row and bottom player details.
 - Unsupported or unrecognized decoded payloads are shown as explicit failures; the app does not report fake conversions.
 
 ## Build
