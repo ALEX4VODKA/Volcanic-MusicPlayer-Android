@@ -28,6 +28,9 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.volcanic.musicplayer.decoder.DecodedAudio;
+import com.volcanic.musicplayer.decoder.PrivateContainerDecoder;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -58,6 +61,7 @@ public class MainActivity extends Activity {
     private int currentIndex = -1;
     private boolean prepared = false;
     private File playlistFile;
+    private File inputDir;
     private File outputDir;
 
     private final int bg = Color.rgb(5, 7, 10);
@@ -75,7 +79,11 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         playlistFile = new File(getFilesDir(), "playlist.json");
         File musicRoot = getExternalFilesDir(Environment.DIRECTORY_MUSIC);
+        inputDir = new File(getFilesDir(), "VolcanicInput");
         outputDir = new File(musicRoot != null ? musicRoot : getFilesDir(), "VolcanicOutput");
+        if (!inputDir.exists()) {
+            inputDir.mkdirs();
+        }
         if (!outputDir.exists()) {
             outputDir.mkdirs();
         }
@@ -111,7 +119,7 @@ public class MainActivity extends Activity {
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(18), dp(18), dp(12));
+        root.setPadding(dp(18), dp(18), dp(18), dp(34));
         root.setBackgroundColor(bg);
         setContentView(root);
 
@@ -128,12 +136,15 @@ public class MainActivity extends Activity {
         titleBlock.setOrientation(LinearLayout.VERTICAL);
         titleBlock.setPadding(dp(14), 0, 0, 0);
         header.addView(titleBlock, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        titleBlock.addView(textView("Volcanic", 24, text, Typeface.BOLD));
-        titleBlock.addView(textView("Android MP3 output MVP", 13, muted, Typeface.NORMAL));
+        TextView appTitle = textView("Volcanic", 22, text, Typeface.BOLD);
+        appTitle.setSingleLine(true);
+        appTitle.setEllipsize(TextUtils.TruncateAt.END);
+        titleBlock.addView(appTitle);
+        titleBlock.addView(textView("Android decoder", 13, muted, Typeface.NORMAL));
 
         statusText = textView("No tracks", 13, cyan, Typeface.BOLD);
         statusText.setGravity(Gravity.END);
-        header.addView(statusText, new LinearLayout.LayoutParams(dp(142), ViewGroup.LayoutParams.WRAP_CONTENT));
+        header.addView(statusText, new LinearLayout.LayoutParams(dp(92), ViewGroup.LayoutParams.WRAP_CONTENT));
 
         HorizontalScrollView actionScroll = new HorizontalScrollView(this);
         actionScroll.setHorizontalScrollBarEnabled(false);
@@ -221,7 +232,16 @@ public class MainActivity extends Activity {
             // Some providers do not expose persistable permissions.
         }
         String name = displayName(uri);
-        addTrack(new AudioTrack(name, "Imported file", uri.toString(), extensionOf(name)));
+        AudioTrack track = new AudioTrack(name, "Imported file", uri.toString(), extensionOf(name));
+        try {
+            track.localPath = copyUriToInput(uri, name).getAbsolutePath();
+            track.status = "Imported";
+            track.detail = "Local copy ready";
+        } catch (Exception error) {
+            track.status = "Import failed";
+            track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "copy failed");
+        }
+        addTrack(track);
     }
 
     private void requestScan() {
@@ -257,7 +277,16 @@ public class MainActivity extends Activity {
                 String title = valueOr(cursor.getString(titleIndex), display);
                 String artist = valueOr(cursor.getString(artistIndex), "Local music");
                 Uri uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id);
-                addTrack(new AudioTrack(title, artist, uri.toString(), extensionOf(display)));
+                AudioTrack track = new AudioTrack(title, artist, uri.toString(), extensionOf(display));
+                try {
+                    track.localPath = copyUriToInput(uri, valueOr(display, title)).getAbsolutePath();
+                    track.status = "Imported";
+                    track.detail = "Local copy ready";
+                } catch (Exception error) {
+                    track.status = "Import failed";
+                    track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "copy failed");
+                }
+                addTrack(track);
             }
         }
         processAllMp3Outputs();
@@ -286,22 +315,24 @@ public class MainActivity extends Activity {
             track.status = "MP3 output ready";
             return true;
         }
+        File source = sourceFile(track);
+        if (source == null) {
+            track.status = "Input unavailable";
+            track.detail = "Permission denied or local input copy missing. Re-import the file.";
+            return false;
+        }
+        if (PrivateContainerDecoder.isPrivateContainer(track.extension)) {
+            return decodePrivateContainer(track, source);
+        }
         if (!"mp3".equals(track.extension)) {
             track.status = "MP3 output blocked";
             track.detail = "No fake conversion: Android MVP can output MP3 only when the source is already MP3.";
             return false;
         }
         File target = uniqueOutputFile(track.title);
-        try (InputStream input = getContentResolver().openInputStream(Uri.parse(track.uri));
+        try (InputStream input = new FileInputStream(source);
              FileOutputStream output = new FileOutputStream(target)) {
-            if (input == null) {
-                throw new IllegalStateException("Input stream unavailable");
-            }
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                output.write(buffer, 0, read);
-            }
+            copyStream(input, output);
             track.outputPath = target.getAbsolutePath();
             track.status = "MP3 output ready";
             track.detail = target.getAbsolutePath();
@@ -309,6 +340,43 @@ public class MainActivity extends Activity {
         } catch (Exception error) {
             track.status = "MP3 output failed";
             track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "copy failed");
+            return false;
+        }
+    }
+
+    private boolean decodePrivateContainer(AudioTrack track, File source) {
+        try {
+            DecodedAudio decoded = PrivateContainerDecoder.decode(source, track.extension);
+            if ("unknown".equals(decoded.format)) {
+                track.status = "Decode failed";
+                track.detail = "Decoded payload is not MP3/FLAC/WAV";
+                return false;
+            }
+
+            File decodedFile = uniqueDecodedFile(track.title, decoded.format);
+            try (FileOutputStream output = new FileOutputStream(decodedFile)) {
+                output.write(decoded.payload);
+            }
+            track.decodedPath = decodedFile.getAbsolutePath();
+
+            if (decoded.isMp3()) {
+                File target = uniqueOutputFile(track.title);
+                try (InputStream input = new FileInputStream(decodedFile);
+                     FileOutputStream output = new FileOutputStream(target)) {
+                    copyStream(input, output);
+                }
+                track.outputPath = target.getAbsolutePath();
+                track.status = "MP3 output ready";
+                track.detail = target.getAbsolutePath();
+                return true;
+            }
+
+            track.status = "Decoded " + decoded.format.toUpperCase(Locale.ROOT);
+            track.detail = "Decoded playable file: " + decodedFile.getAbsolutePath() + ". MP3 encoding is not bundled in Android yet.";
+            return false;
+        } catch (Exception error) {
+            track.status = "Decode failed";
+            track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "private container decode failed");
             return false;
         }
     }
@@ -386,8 +454,17 @@ public class MainActivity extends Activity {
         if ("mp3".equals(track.extension) && ensureMp3Output(track)) {
             return Uri.fromFile(new File(track.outputPath));
         }
+        if (PrivateContainerDecoder.isPrivateContainer(track.extension) && ensureMp3Output(track)) {
+            if (track.outputPath != null && new File(track.outputPath).exists()) {
+                return Uri.fromFile(new File(track.outputPath));
+            }
+            if (track.decodedPath != null && new File(track.decodedPath).exists()) {
+                return Uri.fromFile(new File(track.decodedPath));
+            }
+        }
         if (isAndroidPlayable(track.extension)) {
-            return Uri.parse(track.uri);
+            File source = sourceFile(track);
+            return source != null ? Uri.fromFile(source) : Uri.parse(track.uri);
         }
         return null;
     }
@@ -472,6 +549,8 @@ public class MainActivity extends Activity {
                 object.put("title", track.title);
                 object.put("subtitle", track.subtitle);
                 object.put("uri", track.uri);
+                object.put("localPath", track.localPath);
+                object.put("decodedPath", track.decodedPath);
                 object.put("extension", track.extension);
                 object.put("outputPath", track.outputPath);
                 object.put("status", track.status);
@@ -507,10 +586,10 @@ public class MainActivity extends Activity {
                         object.optString("uri"),
                         object.optString("extension", "unknown")
                 );
+                track.localPath = emptyToNull(object.optString("localPath", null));
+                track.decodedPath = emptyToNull(object.optString("decodedPath", null));
                 track.outputPath = object.optString("outputPath", null);
-                if (track.outputPath != null && track.outputPath.trim().isEmpty()) {
-                    track.outputPath = null;
-                }
+                track.outputPath = emptyToNull(track.outputPath);
                 track.status = object.optString("status", "Waiting");
                 track.detail = object.optString("detail", "");
                 addTrack(track);
@@ -562,6 +641,36 @@ public class MainActivity extends Activity {
         return valueOr(name, "Unknown audio");
     }
 
+    private File copyUriToInput(Uri uri, String displayName) throws Exception {
+        File target = uniqueInputFile(displayName);
+        try (InputStream input = getContentResolver().openInputStream(uri);
+             FileOutputStream output = new FileOutputStream(target)) {
+            if (input == null) {
+                throw new IllegalStateException("Input stream unavailable");
+            }
+            copyStream(input, output);
+        }
+        return target;
+    }
+
+    private void copyStream(InputStream input, FileOutputStream output) throws Exception {
+        byte[] buffer = new byte[64 * 1024];
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
+    }
+
+    private File sourceFile(AudioTrack track) {
+        if (track.localPath != null) {
+            File local = new File(track.localPath);
+            if (local.exists()) {
+                return local;
+            }
+        }
+        return null;
+    }
+
     private String extensionOf(String name) {
         if (name == null) {
             return "unknown";
@@ -584,6 +693,32 @@ public class MainActivity extends Activity {
         return target;
     }
 
+    private File uniqueDecodedFile(String title, String extension) {
+        String base = sanitizeBaseName(title);
+        File target = new File(outputDir, base + ".decoded." + extension);
+        int counter = 2;
+        while (target.exists()) {
+            target = new File(outputDir, base + "-" + counter + ".decoded." + extension);
+            counter++;
+        }
+        return target;
+    }
+
+    private File uniqueInputFile(String title) {
+        String base = sanitizeBaseName(title);
+        String extension = extensionOf(title);
+        if ("unknown".equals(extension)) {
+            extension = "bin";
+        }
+        File target = new File(inputDir, base + "." + extension);
+        int counter = 2;
+        while (target.exists()) {
+            target = new File(inputDir, base + "-" + counter + "." + extension);
+            counter++;
+        }
+        return target;
+    }
+
     private String sanitizeBaseName(String value) {
         String cleaned = value == null ? "track" : value.replaceAll("\\.[^.]+$", "").replaceAll("[^A-Za-z0-9._-]+", "_");
         if (cleaned.trim().isEmpty()) {
@@ -594,6 +729,10 @@ public class MainActivity extends Activity {
 
     private String valueOr(String value, String fallback) {
         return value == null || value.trim().isEmpty() ? fallback : value;
+    }
+
+    private String emptyToNull(String value) {
+        return value == null || value.trim().isEmpty() || "null".equals(value) ? null : value;
     }
 
     private Button actionButton(String label, View.OnClickListener listener) {
@@ -730,6 +869,8 @@ public class MainActivity extends Activity {
         final String subtitle;
         final String uri;
         final String extension;
+        String localPath;
+        String decodedPath;
         String outputPath;
         String status = "Waiting";
         String detail = "";

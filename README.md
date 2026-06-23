@@ -6,9 +6,18 @@ This folder is an isolated Android implementation for Volcanic. It does not chan
 
 - Import local audio through Android document picker.
 - Scan local media library when the user grants audio read permission.
+- Copy imported files into app-private input storage before decoding to avoid stale URI permission failures.
+- Decode `.ncm`, `.kgm`/`.vpr`, and `.qmc` private containers locally.
+- Detect decoded payloads as MP3, FLAC, or WAV.
 - Persist the playlist to app-private storage.
 - Play, pause, previous, next, remove, and clear tracks.
 - Keep UI dark, compact, and readable.
+
+## Decode behavior
+
+- MP3 payloads are written to `VolcanicOutput` as `.mp3` and used for playback.
+- FLAC/WAV payloads are written as decoded playable files. Android playback can use them, but MP3 encoding is not bundled in this APK yet.
+- Unsupported or unrecognized decoded payloads are shown as explicit failures; the app does not report fake conversions.
 
 ## Build
 
