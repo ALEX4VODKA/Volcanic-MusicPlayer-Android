@@ -29,6 +29,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.volcanic.musicplayer.decoder.DecodedAudio;
+import com.volcanic.musicplayer.decoder.Mp3Transcoder;
 import com.volcanic.musicplayer.decoder.PrivateContainerDecoder;
 
 import org.json.JSONArray;
@@ -181,8 +182,9 @@ public class MainActivity extends Activity {
         nowTitle.setEllipsize(TextUtils.TruncateAt.END);
         playerBar.addView(nowTitle);
 
-        nowMeta = textView("Tap a track. MP3 files are copied to the output folder.", 12, muted, Typeface.NORMAL);
-        nowMeta.setSingleLine(true);
+        nowMeta = textView("Tap a track. Converted files stay in VolcanicOutput.", 12, muted, Typeface.NORMAL);
+        nowMeta.setSingleLine(false);
+        nowMeta.setMaxLines(3);
         nowMeta.setEllipsize(TextUtils.TruncateAt.END);
         playerBar.addView(nowMeta);
 
@@ -325,8 +327,8 @@ public class MainActivity extends Activity {
             return decodePrivateContainer(track, source);
         }
         if (!"mp3".equals(track.extension)) {
-            track.status = "MP3 output blocked";
-            track.detail = "No fake conversion: Android MVP can output MP3 only when the source is already MP3.";
+            track.status = "MP3 encode pending";
+            track.detail = "Use decoded/private containers or MP3 source. Other direct formats need a decoder first.";
             return false;
         }
         File target = uniqueOutputFile(track.title);
@@ -359,24 +361,22 @@ public class MainActivity extends Activity {
             }
             track.decodedPath = decodedFile.getAbsolutePath();
 
+            File target = uniqueOutputFile(track.title);
             if (decoded.isMp3()) {
-                File target = uniqueOutputFile(track.title);
                 try (InputStream input = new FileInputStream(decodedFile);
                      FileOutputStream output = new FileOutputStream(target)) {
                     copyStream(input, output);
                 }
-                track.outputPath = target.getAbsolutePath();
-                track.status = "MP3 output ready";
-                track.detail = target.getAbsolutePath();
-                return true;
+            } else {
+                Mp3Transcoder.transcodeToMp3(decodedFile, target, 192_000);
             }
-
-            track.status = "Decoded " + decoded.format.toUpperCase(Locale.ROOT);
-            track.detail = "Decoded playable file: " + decodedFile.getAbsolutePath() + ". MP3 encoding is not bundled in Android yet.";
-            return false;
+            track.outputPath = target.getAbsolutePath();
+            track.status = "MP3 output ready";
+            track.detail = target.getAbsolutePath();
+            return true;
         } catch (Exception error) {
-            track.status = "Decode failed";
-            track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "private container decode failed");
+            track.status = track.decodedPath == null ? "Decode failed" : "MP3 encode failed";
+            track.detail = error.getClass().getSimpleName() + ": " + valueOr(error.getMessage(), "private container decode or encode failed");
             return false;
         }
     }
@@ -398,8 +398,8 @@ public class MainActivity extends Activity {
 
         Uri playUri = playbackUri(track);
         if (playUri == null) {
-            track.status = "Playback blocked";
-            track.detail = "Select an MP3 source or use the desktop converter for " + track.extension.toUpperCase(Locale.ROOT);
+            track.status = "Playback unavailable";
+            track.detail = "No playable output for " + track.extension.toUpperCase(Locale.ROOT);
             refreshUi();
             toast(track.detail);
             return;
@@ -476,6 +476,9 @@ public class MainActivity extends Activity {
     private String playableLabel(AudioTrack track) {
         if (track.outputPath != null) {
             return "MP3 output: " + track.outputPath;
+        }
+        if (track.decodedPath != null) {
+            return "Decoded file: " + track.decodedPath;
         }
         return "Original source: " + track.extension.toUpperCase(Locale.ROOT);
     }
@@ -720,7 +723,10 @@ public class MainActivity extends Activity {
     }
 
     private String sanitizeBaseName(String value) {
-        String cleaned = value == null ? "track" : value.replaceAll("\\.[^.]+$", "").replaceAll("[^A-Za-z0-9._-]+", "_");
+        String cleaned = value == null ? "track" : value
+                .replaceAll("\\.[^.]+$", "")
+                .replaceAll("[\\\\/:*?\"<>|\\u0000-\\u001F]+", "_")
+                .trim();
         if (cleaned.trim().isEmpty()) {
             return "track";
         }
@@ -848,7 +854,13 @@ public class MainActivity extends Activity {
             statusView.setEllipsize(TextUtils.TruncateAt.END);
             copy.addView(statusView);
 
-            TextView hint = textView("long press delete", 10, muted, Typeface.NORMAL);
+            TextView pathView = textView(pathText(track), 10, muted, Typeface.NORMAL);
+            pathView.setSingleLine(false);
+            pathView.setMaxLines(2);
+            pathView.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+            copy.addView(pathView);
+
+            TextView hint = textView("delete", 10, muted, Typeface.NORMAL);
             row.addView(hint);
             return row;
         }
@@ -861,6 +873,16 @@ public class MainActivity extends Activity {
                 return amber;
             }
             return cyan;
+        }
+
+        private String pathText(AudioTrack track) {
+            if (track.outputPath != null) {
+                return "MP3: " + track.outputPath;
+            }
+            if (track.decodedPath != null) {
+                return "Decoded: " + track.decodedPath;
+            }
+            return valueOr(track.detail, "Long press to delete");
         }
     }
 
