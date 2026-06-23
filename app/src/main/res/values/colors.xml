@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="volcanic_bg">#05070A</color>
+    <color name="volcanic_panel">#111720</color>
+    <color name="volcanic_cyan">#6FF7FF</color>
+    <color name="volcanic_red">#FF3F57</color>
+</resources>

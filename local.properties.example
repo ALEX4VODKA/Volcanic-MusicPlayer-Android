@@ -1,0 +1,3 @@
+# Copy this file to local.properties when Android SDK is not configured globally.
+# Prefer the isolated SDK view created under this folder:
+# sdk.dir=F:/Codex-projects/Volcanic-musicplayer/android-apk/.android-sdk
