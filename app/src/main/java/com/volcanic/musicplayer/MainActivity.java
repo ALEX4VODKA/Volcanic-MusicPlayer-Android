@@ -29,7 +29,6 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.volcanic.musicplayer.decoder.DecodedAudio;
 import com.volcanic.musicplayer.decoder.PrivateContainerDecoder;
 
 import org.json.JSONArray;
@@ -84,8 +83,8 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         playlistFile = new File(getFilesDir(), "playlist.json");
         File musicRoot = getExternalFilesDir(Environment.DIRECTORY_MUSIC);
-        inputDir = new File(getFilesDir(), "VolcanicInput");
-        outputDir = new File(musicRoot != null ? musicRoot : getFilesDir(), "VolcanicOutput");
+        inputDir = new File(getFilesDir(), "VulcanInput");
+        outputDir = new File(musicRoot != null ? musicRoot : getFilesDir(), "VulcanOutput");
         if (!inputDir.exists()) {
             inputDir.mkdirs();
         }
@@ -142,7 +141,7 @@ public class MainActivity extends Activity {
         titleBlock.setOrientation(LinearLayout.VERTICAL);
         titleBlock.setPadding(dp(14), 0, 0, 0);
         header.addView(titleBlock, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        TextView appTitle = textView("Volcanic", 22, text, Typeface.BOLD);
+        TextView appTitle = textView("Vulcan Conventer", 22, text, Typeface.BOLD);
         appTitle.setSingleLine(true);
         appTitle.setEllipsize(TextUtils.TruncateAt.END);
         titleBlock.addView(appTitle);
@@ -163,6 +162,7 @@ public class MainActivity extends Activity {
         actions.addView(actionButton("导入", this::openAudioPicker));
         actions.addView(actionButton("扫描", v -> requestScan()));
         actions.addView(actionButton("处理输出", v -> processAllOutputsAsync()));
+        actions.addView(actionButton("打开输出", v -> openOutputFolder()));
         actions.addView(actionButton("清空", v -> clearPlaylist()));
         actions.addView(actionButton("保存", v -> savePlaylist()));
 
@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
         nowTitle.setEllipsize(TextUtils.TruncateAt.END);
         playerBar.addView(nowTitle);
 
-        nowMeta = textView("点按歌曲播放。解包文件会保存在 VolcanicOutput。", 12, muted, Typeface.NORMAL);
+        nowMeta = textView("点按歌曲播放。解包文件会保存在 VulcanOutput。", 12, muted, Typeface.NORMAL);
         nowMeta.setSingleLine(false);
         nowMeta.setMaxLines(5);
         playerBar.addView(nowMeta);
@@ -369,10 +369,37 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void openOutputFolder() {
+        if (!outputDir.exists() && !outputDir.mkdirs()) {
+            toast("无法创建输出目录：" + outputDir.getAbsolutePath());
+            return;
+        }
+        toast("输出目录：" + outputDir.getAbsolutePath());
+
+        Intent folderIntent = new Intent(Intent.ACTION_VIEW);
+        folderIntent.setDataAndType(Uri.fromFile(outputDir), "resource/folder");
+        folderIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(folderIntent);
+            return;
+        } catch (Exception ignored) {
+            // Fall back to Android's document browser when the device blocks direct folder URIs.
+        }
+
+        Intent treeIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        treeIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        try {
+            startActivity(treeIntent);
+        } catch (Exception error) {
+            toast("无法打开文件管理器，请手动进入：" + outputDir.getAbsolutePath());
+        }
+    }
+
     private ProcessSummary processOutputsOnWorker() {
         int ready = 0;
         int pending = 0;
-        for (AudioTrack track : tracks) {
+        ArrayList<AudioTrack> snapshot = new ArrayList<>(tracks);
+        for (AudioTrack track : snapshot) {
             if (ensureMp3Output(track)) {
                 ready++;
             } else {
@@ -432,37 +459,42 @@ public class MainActivity extends Activity {
     }
 
     private boolean decodePrivateContainer(AudioTrack track, File source) {
+        File tempDecoded = null;
         try {
-            DecodedAudio decoded = PrivateContainerDecoder.decode(source, track.extension);
-            if ("unknown".equals(decoded.format)) {
+            tempDecoded = uniqueDecodedFile(track.title, "part");
+            String format = PrivateContainerDecoder.decodeToFile(source, track.extension, tempDecoded);
+            if ("unknown".equals(format)) {
                 track.status = "解包失败";
                 track.detail = "解包负载不是 MP3/FLAC/WAV";
+                if (tempDecoded.exists()) {
+                    tempDecoded.delete();
+                }
                 return false;
             }
 
-            File decodedFile = uniqueDecodedFile(track.title, decoded.format);
-            try (FileOutputStream output = new FileOutputStream(decodedFile)) {
-                output.write(decoded.payload);
+            File decodedFile = uniqueDecodedFile(track.title, format);
+            if (!tempDecoded.renameTo(decodedFile)) {
+                try (InputStream input = new FileInputStream(tempDecoded);
+                     FileOutputStream output = new FileOutputStream(decodedFile)) {
+                    copyStream(input, output);
+                }
+                tempDecoded.delete();
             }
             track.decodedPath = decodedFile.getAbsolutePath();
 
-            File target = uniqueOutputFile(track.title, decoded.format);
-            if (decoded.isMp3()) {
-                try (InputStream input = new FileInputStream(decodedFile);
-                     FileOutputStream output = new FileOutputStream(target)) {
-                    copyStream(input, output);
-                }
-            } else {
-                try (InputStream input = new FileInputStream(decodedFile);
-                     FileOutputStream output = new FileOutputStream(target)) {
-                    copyStream(input, output);
-                }
+            File target = uniqueOutputFile(track.title, format);
+            try (InputStream input = new FileInputStream(decodedFile);
+                 FileOutputStream output = new FileOutputStream(target)) {
+                copyStream(input, output);
             }
             track.outputPath = target.getAbsolutePath();
             track.status = outputStatus(track.outputPath);
             track.detail = target.getAbsolutePath();
             return true;
         } catch (Exception error) {
+            if (tempDecoded != null && tempDecoded.exists()) {
+                tempDecoded.delete();
+            }
             track.status = track.decodedPath == null ? "解包失败" : "输出失败";
             track.detail = error.getClass().getSimpleName() + "：" + valueOr(error.getMessage(), "私有容器解包失败");
             return false;
@@ -600,6 +632,10 @@ public class MainActivity extends Activity {
     }
 
     private void removeAt(int position) {
+        if (processing) {
+            toast("正在处理中，请稍后再删除");
+            return;
+        }
         if (position < 0 || position >= tracks.size()) {
             return;
         }
@@ -616,6 +652,10 @@ public class MainActivity extends Activity {
     }
 
     private void clearPlaylist() {
+        if (processing) {
+            toast("正在处理中，请稍后再清空");
+            return;
+        }
         releasePlayer();
         tracks.clear();
         knownUris.clear();
